@@ -15,6 +15,7 @@ jobs:
           path: repo
           key: home-x86_64
       - run: dnf install -y lorax wget rpm-ostree git hfsplus-tools pykickstart
+      - run: dnf groupinstall -y "Development Tools"
       - run: sudo make SPIN=gnome image
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3.0.0
