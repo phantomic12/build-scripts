@@ -1,0 +1,83 @@
+name: Automatically Build ISOs
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  build-home-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: repo
+          key: home-x86_64
+      - run: dnf install -y lorax wget rpm-ostree git hfsplus-tools
+      - run: ostree init --repo repo --mode archive
+      - run: ostree remote add --no-gpg-verify --if-not-exists --repo repo tauOS https://repo.tauos.co/ostree tau/home/1.1/x86_64
+      - run: ostree pull --repo repo --mirror tauOS tau/home/1.1/x86_64
+      - run: |
+          lorax --product=tauOS \
+          --version=1.1 \
+          --release=1.1 \
+          --variant=desktop \
+          --source=https://kojipkgs.fedoraproject.org/compose/36/latest-Fedora-36/compose/Everything/x86_64/os/ \
+          --source=https://repo.tauos.co/releases/1.1/ \
+          --installpkgs=tau-logos \
+          --installpkgs=tau-release \
+          --installpkgs=tau-release-desktop \
+          --installpkgs=tau-repos \
+          --installpkgs=tau-gpg-keys \
+          --installpkgs=fedora-repos \
+          --installpkgs=tau-anaconda-profiles \
+          --installpkgs=tau-plymouth \
+          --installpkgs=tau-helium \
+          --installpkgs=tau-hydrogen \
+          --installpkgs=tau-manrope-fonts \
+          --volid=tauOS-Home-Installer \
+          --nomacboot \
+          --skip-branding \
+          --add-template=$(pwd)/lorax-configure-repo.tmpl \
+          --add-template=$(pwd)/lorax-embed-repo.tmpl \
+          --add-template-var=ostree_install_repo=file://$(pwd)/repo \
+          --add-template-var=ostree_update_repo=https://repo.tauos.co/ostree \
+          --add-template-var=ostree_osname=tauOS \
+          --add-template-var=ostree_oskey=tauOS-home \
+          --add-template-var=ostree_contenturl=https://repo.tauos.co/ostree \
+          --add-template-var=ostree_install_ref=tau/home/1.1/x86_64 \
+          --add-template-var=ostree_update_ref=tau/home/1.1/x86_64 \
+          --logfile=$(pwd)/lorax.log \
+          --tmp=$(pwd)/tmp \
+          --rootfs-size=8 \
+          $(pwd)/home-x86_64
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3.0.0
+        with:
+          name: home-x86_64.iso
+          path: home-x86_64/images/boot.iso
+  publish:
+    if: ${{ always() }}
+    needs: [build-home-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup SSH
+      uses: fastai/workflows/ssh@master
+      with:
+          ssh_key: ${{ secrets.SSH_KEY }}
+          key_file: id_ecdsa
+    - uses: actions/checkout@v3
+    - name: Download Artifacts
+      uses: actions/download-artifact@v3.0.0
+    - name: Prepare for Upload
+      run: |
+        mkdir images
+        mv home-x86_64.iso images/home-x86_64.iso
+        ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
+        sshpass -p "${{ secrets.PASSWORD }}" rsync -arsP -e ssh images/ "${{ secrets.USERNAME }}@frs.sourceforge.net:${{ secrets.SOURCEFORGE_DIR }}"

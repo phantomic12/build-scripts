@@ -1,0 +1,42 @@
+name: Manually Build ISOs
+
+on: workflow_dispatch
+
+jobs:
+  build-home-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: repo
+          key: home-x86_64
+      - run: dnf install -y lorax wget rpm-ostree git hfsplus-tools pykickstart
+      - run: sudo make SPIN=gnome image
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3.0.0
+        with:
+          name: home-x86_64.iso
+          path: home-x86_64/images/boot.iso
+  publish:
+    if: ${{ always() }}
+    needs: [build-home-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup SSH
+      uses: fastai/workflows/ssh@master
+      with:
+          ssh_key: ${{ secrets.SSH_KEY }}
+          key_file: id_ecdsa
+    - uses: actions/checkout@v3
+    - name: Download Artifacts
+      uses: actions/download-artifact@v3.0.0
+    - name: Prepare for Upload
+      run: |
+        mkdir images
+        mv home-x86_64.iso images/home-x86_64.iso
+        ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
+        sshpass -p "${{ secrets.PASSWORD }}" rsync -arsP -e ssh images/ "${{ secrets.USERNAME }}@frs.sourceforge.net:${{ secrets.SOURCEFORGE_DIR }}"
